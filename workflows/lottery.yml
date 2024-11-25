@@ -1,0 +1,27 @@
+name: bu
+
+on:
+  schedule:
+    - cron: '0 12 * * *'  # 每天12点运行
+  workflow_dispatch:        # 允许手动触发
+
+jobs:
+  lottery:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run lottery script
+      env:
+        BILIBILI_COOKIES: ${{ secrets.BILIBILI_COOKIES }}
+      run: python main.py
