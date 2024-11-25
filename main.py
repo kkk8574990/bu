@@ -271,13 +271,15 @@ async def lottery_task(biliapi: BiliAPI):
     fail_count = 0
     processed_dynamics = set()
     current_time = int(time.time())
+    one_day_ago = current_time - 24 * 3600  # 24小时前的时间戳
 
     for up_id in follow_list:
         try:
             print(f"\n检查UP主 {up_id} 的动态...")
             offset = ''
+            is_early = False  # 标记是否遇到了24小时前的动态
             
-            while True:
+            while True and not is_early:  # 如果遇到早于24小时的动态就停止获取
                 ret = await biliapi.get_user_dynamics(up_id, offset)
                 if ret["code"] != 0:
                     print(f"获取UP主 {up_id} 动态失败: {ret.get('message', '未知错误')}")
@@ -294,6 +296,13 @@ async def lottery_task(biliapi: BiliAPI):
                         dynamic_id = dynamic["id_str"]
                         if dynamic_id in processed_dynamics:
                             continue
+
+                        # 检查动态时间
+                        timestamp = int(str(dynamic_id)[:10])  # 动态ID前10位是时间戳
+                        if timestamp < one_day_ago:
+                            print(f"遇到24小时前的动态，停止检查此UP主")
+                            is_early = True
+                            break
 
                         # 检查动态内容
                         if "module_dynamic" not in dynamic["modules"]:
@@ -358,6 +367,9 @@ async def lottery_task(biliapi: BiliAPI):
                     except Exception as e:
                         print(f"处理动态时出错: {str(e)}")
                         continue
+
+                if is_early:  # 如果遇到早于24小时的动态，跳出外层循环
+                    break
 
                 # 处理翻页
                 if "offset" in ret["data"] and ret["data"]["offset"]:
