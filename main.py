@@ -237,6 +237,19 @@ async def process_account(account: dict):
             await lottery_task(biliapi)
 
 async def lottery_task(biliapi: BiliAPI):
+    # 计算需要转发的时间区间
+    now_time = int(time.time())
+    today_time = now_time - (now_time + 28800) % 86400  # 转换为北京时间
+    time_quantum = [-43200, 43200]  # 默认时间区间：前12小时到后12小时
+    start_time = today_time + time_quantum[0]
+    num = (now_time - start_time) // (time_quantum[1] - time_quantum[0])
+    start_time = start_time + (num - 1) * (time_quantum[1] - time_quantum[0])
+    end_time = start_time + (time_quantum[1] - time_quantum[0])
+
+    print(f"\n当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now_time))}")
+    print(f"开始时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
+    print(f"结束时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))}")
+
     config = {
         "reply": ["今天是个好日子中奖的好日子", "最可爱的就是这个啦,我超级喜欢",
                  "我们都是好朋友，我相信你还记得的，嘤嘤嘤","给我也整一个,我太爱了"],
@@ -270,16 +283,14 @@ async def lottery_task(biliapi: BiliAPI):
     success_count = 0
     fail_count = 0
     processed_dynamics = set()
-    current_time = int(time.time())
-    one_day_ago = current_time - 24 * 3600  # 24小时前的时间戳
 
     for up_id in follow_list:
         try:
             print(f"\n检查UP主 {up_id} 的动态...")
             offset = ''
-            is_early = False  # 标记是否遇到了24小时前的动态
+            is_early = False  # 标记是否遇到了区间外的动态
             
-            while True and not is_early:  # 如果遇到早于24小时的动态就停止获取
+            while True and not is_early:
                 ret = await biliapi.get_user_dynamics(up_id, offset)
                 if ret["code"] != 0:
                     print(f"获取UP主 {up_id} 动态失败: {ret.get('message', '未知错误')}")
@@ -299,8 +310,10 @@ async def lottery_task(biliapi: BiliAPI):
 
                         # 检查动态时间
                         timestamp = int(str(dynamic_id)[:10])  # 动态ID前10位是时间戳
-                        if timestamp < one_day_ago:
-                            print(f"遇到24小时前的动态，停止检查此UP主")
+                        if timestamp > end_time:
+                            continue
+                        if timestamp < start_time:
+                            print(f"遇到时间区间外的动态，停止检查此UP主")
                             is_early = True
                             break
 
@@ -368,7 +381,7 @@ async def lottery_task(biliapi: BiliAPI):
                         print(f"处理动态时出错: {str(e)}")
                         continue
 
-                if is_early:  # 如果遇到早于24小时的动态，跳出外层循环
+                if is_early:  # 如果遇到区间外的动态，跳出外层循环
                     break
 
                 # 处理翻页
