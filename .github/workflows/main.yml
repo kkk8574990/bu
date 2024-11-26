@@ -2,7 +2,7 @@ name: Bilibili Lottery
 
 on:
   schedule:
-    - cron: '0 12 * * *'  # 每天12点运行
+    - cron: '0 4 * * *'  # UTC 4:00 = 北京时间 12:00
   workflow_dispatch:        # 允许手动触发
 
 jobs:
