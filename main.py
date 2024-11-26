@@ -190,6 +190,8 @@ async def lottery_task(biliapi: BiliAPI):
     follow_list = []
     page = 1
     while True:
+        wait_time = random.uniform(15, 20)
+        await asyncio.sleep(wait_time)
         ret = await biliapi.get_followings(page)
         if ret["code"] == 0:
             if not ret["data"]["list"]:
