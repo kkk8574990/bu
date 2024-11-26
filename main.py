@@ -5,7 +5,7 @@ import random
 import time
 import logging
 import re
-import os  # 添加这一行
+import os
 import sys
 from typing import List, Dict, Any
 
@@ -23,7 +23,16 @@ class BiliAPI:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://t.bilibili.com/',
-            'Connection': 'keep-alive'
+            'Connection': 'keep-alive',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site'
         }
         self.name = None
         self.uid = None
@@ -72,11 +81,16 @@ class BiliAPI:
             print(f"获取关注列表失败: {e}")
             return {"code": -1}
 
-    async def get_user_dynamics(self, uid: int, offset: str = '') -> dict:
+    async def get_user_dynamics(self, offset: str = '') -> dict:
         '''获取用户动态'''
         try:
-            url = f'https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset={offset}&host_mid={uid}&timezone_offset=-480'
-            async with self.session.get(url) as response:
+            url = f'https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?offset={offset}&host_mid={self.uid}&timezone_offset=-480'
+            headers = {
+                **self.headers,
+                'Origin': 'https://space.bilibili.com',
+                'Referer': f'https://space.bilibili.com/{self.uid}/dynamic'
+            }
+            async with self.session.get(url, headers=headers) as response:
                 return await response.json()
         except Exception as e:
             print(f"获取动态失败: {e}")
@@ -129,29 +143,36 @@ class BiliAPI:
             print(f"点赞失败: {e}")
             return {"code": -1}
 
-async def checkConfig(config) -> bool:
-    """检查配置是否正确"""
-    try:
-        interval = config.get('interval', (18, 47))  # 动态检测间隔(s)
-        if not isinstance(interval, (list, tuple)) or len(interval) != 2:
-            print("interval 配置错误，将使用默认值(18, 47)")
-            config['interval'] = (18, 47)
-            
-        config['interval'] = (
-            min(interval[0], interval[1]),
-            max(interval[0], interval[1])
-        )
-        
-        # 检查time_quantum配置
-        time_quantum = config.get('time_quantum', [-43200, 43200])
-        if not isinstance(time_quantum, (list, tuple)) or len(time_quantum) != 2:
-            print("time_quantum 配置错误，将使用默认值[-43200, 43200]")
-            config['time_quantum'] = [-43200, 43200]
-        
-        return True
-    except Exception as e:
-        print(f"配置检查失败: {str(e)}")
-        return False
+async def get_dynamic(biliapi):
+    """获取动态的生成器函数"""
+    offset = ''
+    while True:
+        try:
+            ret = await biliapi.get_user_dynamics(offset=offset)
+            if ret["code"] == -352:
+                wait_time = random.uniform(60, 90)
+                print(f"遇到风控，将等待 {wait_time:.1f} 秒后继续...")
+                await asyncio.sleep(wait_time)
+                continue
+            elif ret["code"] != 0:
+                print(f"获取动态失败: {ret.get('message', '未知错误')}")
+                break
+
+            if not ret["data"].get("items"):
+                break
+
+            for dynamic in ret["data"]["items"]:
+                yield dynamic
+
+            if "offset" in ret["data"] and ret["data"]["offset"]:
+                offset = ret["data"]["offset"]
+                await asyncio.sleep(2)
+            else:
+                break
+
+        except Exception as e:
+            print(f"获取动态出错: {str(e)}")
+            break
 
 async def lottery_task(biliapi: BiliAPI):
     config = {
@@ -162,25 +183,18 @@ async def lottery_task(biliapi: BiliAPI):
         "keywords": ["^((?!恭喜).)*#互动抽奖#((?!恭喜).)*$", "^((?!恭喜).)*#抽奖#((?!恭喜).)*$",
                     ".*(转|抽|评).*(转|抽|评).*(转|抽|评).*"],
         "delay": [53, 337],
-        "interval": (18, 47),  # 动态检测间隔(s)
-        "time_quantum": [-43200, 43200]  # 时间范围：前12小时到后12小时
+        "interval": (15, 20)  # 获取关注列表的延迟
     }
-    
-    # 检查配置
-    if not await checkConfig(config):
-        print("配置检查失败，退出程序")
-        return
 
     # 计算时间区间（北京时间）
     now_time = int(time.time())
     today_time = now_time - (now_time + 28800) % 86400  # 转换为北京时间的零点
-    time_quantum = config.get("time_quantum", [-43200, 43200])
+    time_quantum = [-43200, 43200]  # 时间范围：前12小时到后12小时
     start_time = today_time + time_quantum[0]
-    num = (now_time - start_time) // (time_quantum[1] - time_quantum[0])
-    start_time = start_time + (num - 1) * (time_quantum[1] - time_quantum[0])
-    end_time = start_time + (time_quantum[1] - time_quantum[0])
+    end_time = today_time + time_quantum[1]
 
-    print(f"\n当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now_time))}")
+    print(f"\n时间区间：")
+    print(f"当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now_time))}")
     print(f"开始时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
     print(f"结束时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))}")
 
@@ -190,8 +204,11 @@ async def lottery_task(biliapi: BiliAPI):
     follow_list = []
     page = 1
     while True:
-        wait_time = random.uniform(15, 20)
+        # 添加15-20秒的随机延迟
+        wait_time = random.uniform(config['interval'][0], config['interval'][1])
+        print(f"将在 {wait_time:.1f} 秒后获取第{page}页关注列表...")
         await asyncio.sleep(wait_time)
+        
         ret = await biliapi.get_followings(page)
         if ret["code"] == 0:
             if not ret["data"]["list"]:
@@ -199,7 +216,6 @@ async def lottery_task(biliapi: BiliAPI):
             follow_list.extend([x["mid"] for x in ret["data"]["list"]])
             print(f"已获取第{page}页关注列表，当前共{len(follow_list)}个")
             page += 1
-            await asyncio.sleep(random.uniform(2, 3))
         else:
             print(f"获取关注列表第{page}页失败")
             break
@@ -213,107 +229,81 @@ async def lottery_task(biliapi: BiliAPI):
     fail_count = 0
     processed_dynamics = set()
 
-    for up_id in follow_list:
+    async for dynamic in get_dynamic(biliapi):
         try:
-            # 使用配置的间隔时间
-            wait_time = random.uniform(config['interval'][0], config['interval'][1])
-            print(f"\n将在 {wait_time:.1f} 秒后检查UP主 {up_id} 的动态...")
-            await asyncio.sleep(wait_time)
-            
-            ret = await biliapi.get_user_dynamics(up_id, '')
-            if ret["code"] == -352:
-                wait_time = random.uniform(60, 90)
-                print(f"遇到风控，将等待 {wait_time:.1f} 秒后继续...")
-                await asyncio.sleep(wait_time)
+            dynamic_id = dynamic["id_str"]
+            if dynamic_id in processed_dynamics:
                 continue
-            elif ret["code"] != 0:
-                print(f"获取UP主 {up_id} 动态失败: {ret.get('message', '未知错误')}")
+                
+            # 检查动态时间是否在指定范围内
+            timestamp = dynamic["module_author"]["pub_ts"]
+            if timestamp > end_time:
                 continue
+            elif timestamp < start_time:
+                print(f"动态时间早于开始时间，停止检查")
+                break
 
-            if not ret["data"].get("items"):
-                print(f"UP主 {up_id} 没有动态")
+            if "module_dynamic" not in dynamic["modules"]:
                 continue
 
-            for dynamic in ret["data"]["items"]:
-                try:
-                    if not all(key in dynamic for key in ["id_str", "modules"]):
-                        continue
+            content = ""
+            module_dynamic = dynamic["modules"]["module_dynamic"]
+            if module_dynamic and isinstance(module_dynamic, dict):
+                desc = module_dynamic.get("desc", {})
+                if isinstance(desc, dict):
+                    content = desc.get("text", "")
 
-                    dynamic_id = dynamic["id_str"]
-                    if dynamic_id in processed_dynamics:
-                        continue
+            if not content:
+                continue
 
-                    # 检查动态时间是否在指定范围内
-                    timestamp = int(str(dynamic_id)[:10])  # 动态ID前10位是时间戳
-                    if timestamp < start_time or timestamp > end_time:
-                        # print(f"动态时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))} 不在指定范围内，跳过")
-                        continue
+            # 检查是否是抽奖动态
+            is_lottery = False
+            for pattern in keywords:
+                if re.match(pattern, content):
+                    is_lottery = True
+                    break
 
-                    if "module_dynamic" not in dynamic["modules"]:
-                        continue
+            if is_lottery:
+                print(f"\n发现抽奖动态: {content[:50]}...")
+                print(f"动态时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))}")
+                processed_dynamics.add(dynamic_id)
 
-                    content = ""
-                    module_dynamic = dynamic["modules"]["module_dynamic"]
-                    if module_dynamic and isinstance(module_dynamic, dict):
-                        desc = module_dynamic.get("desc", {})
-                        if isinstance(desc, dict):
-                            content = desc.get("text", "")
+                # 转发
+                print("开始转发...")
+                repost_content = random.choice(config["repost"])
+                repost_ret = await biliapi.repost_dynamic(dynamic_id, repost_content)
+                if repost_ret["code"] == 0:
+                    print(f"转发成功! 内容: {repost_content}")
+                    success_count += 1
+                else:
+                    print(f"转发失败: {repost_ret.get('message', '未知错误')}")
+                    fail_count += 1
 
-                    if not content:
-                        continue
+                # 评论
+                await asyncio.sleep(2)
+                print("开始评论...")
+                reply_content = random.choice(config["reply"])
+                reply_ret = await biliapi.dynamic_reply(dynamic_id, reply_content)
+                if reply_ret["code"] == 0:
+                    print(f"评论成功! 内容: {reply_content}")
+                else:
+                    print(f"评论失败: {reply_ret.get('message', '未知错误')}")
 
-                    # 检查是否是抽奖动态
-                    is_lottery = False
-                    for pattern in keywords:
-                        if re.match(pattern, content):
-                            is_lottery = True
-                            break
+                # 点赞
+                await asyncio.sleep(2)
+                print("开始点赞...")
+                like_ret = await biliapi.dynamic_like(dynamic_id)
+                if like_ret["code"] == 0:
+                    print("点赞成功!")
+                else:
+                    print(f"点赞失败: {like_ret.get('message', '未知错误')}")
 
-                    if is_lottery:
-                        print(f"\n发现抽奖动态: {content[:50]}...")
-                        print(f"动态时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))}")
-                        processed_dynamics.add(dynamic_id)
-
-                        # 转发
-                        print("开始转发...")
-                        repost_content = random.choice(config["repost"])
-                        repost_ret = await biliapi.repost_dynamic(dynamic_id, repost_content)
-                        if repost_ret["code"] == 0:
-                            print(f"转发成功! 内容: {repost_content}")
-                            success_count += 1
-                        else:
-                            print(f"转发失败: {repost_ret.get('message', '未知错误')}")
-                            fail_count += 1
-
-                        # 评论
-                        await asyncio.sleep(2)
-                        print("开始评论...")
-                        reply_content = random.choice(config["reply"])
-                        reply_ret = await biliapi.dynamic_reply(dynamic_id, reply_content)
-                        if reply_ret["code"] == 0:
-                            print(f"评论成功! 内容: {reply_content}")
-                        else:
-                            print(f"评论失败: {reply_ret.get('message', '未知错误')}")
-
-                        # 点赞
-                        await asyncio.sleep(2)
-                        print("开始点赞...")
-                        like_ret = await biliapi.dynamic_like(dynamic_id)
-                        if like_ret["code"] == 0:
-                            print("点赞成功!")
-                        else:
-                            print(f"点赞失败: {like_ret.get('message', '未知错误')}")
-
-                        delay = random.randint(config["delay"][0], config["delay"][1])
-                        print(f"本组操作完成，等待 {delay} 秒后继续...")
-                        await asyncio.sleep(delay)
-
-                except Exception as e:
-                    print(f"处理动态时出错: {str(e)}")
-                    continue
+                delay = random.randint(config["delay"][0], config["delay"][1])
+                print(f"本组操作完成，等待 {delay} 秒后继续...")
+                await asyncio.sleep(delay)
 
         except Exception as e:
-            print(f"处理UP主 {up_id} 时出错: {str(e)}")
+            print(f"处理动态时出错: {str(e)}")
             continue
 
     print(f"\n任务完成! 成功转发: {success_count}, 失败: {fail_count}")
