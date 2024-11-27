@@ -235,6 +235,43 @@ async def get_dynamic(biliapi: BiliAPI, uid: int = None):
             print(f"获取动态出错: {str(e)}")
             break
 
+async def get_dynamic(biliapi: BiliAPI, uid: int = None):
+    """获取动态的生成器函数"""
+    offset = ''
+    while True:
+        try:
+            if uid is None:
+                uid = biliapi.uid
+
+            ret = await biliapi.get_user_dynamics(uid, offset)
+            
+            if ret["code"] == -352:
+                wait_time = random.uniform(60, 90)
+                print(f"遇到风控，将等待 {wait_time:.1f} 秒后继续...")
+                await asyncio.sleep(wait_time)
+                continue
+            elif ret["code"] != 0:
+                print(f"获取动态失败: {ret.get('message', '未知错误')}")
+                break
+
+            if not ret["data"].get("items"):
+                break
+
+            for dynamic in ret["data"]["items"]:
+                if not dynamic.get("id_str") or not dynamic.get("modules"):
+                    continue
+                yield dynamic
+
+            if ret["data"].get("has_more") and ret["data"].get("offset"):
+                offset = ret["data"]["offset"]
+                await asyncio.sleep(5)
+            else:
+                break
+
+        except Exception as e:
+            print(f"获取动态出错: {str(e)}")
+            break
+
 async def lottery_task(biliapi: BiliAPI):
     config = {
         "reply": ["今天是个好日子中奖的好日子", "最可爱的就是这个啦,我超级喜欢",
@@ -258,7 +295,7 @@ async def lottery_task(biliapi: BiliAPI):
 
     keywords = [re.compile(x, re.S) for x in config["keywords"]]
     
-    # 获取关注列表
+    # 获取完整关注列表
     print("\n开始获取关注列表...")
     follow_list = []
     page = 1
@@ -278,10 +315,25 @@ async def lottery_task(biliapi: BiliAPI):
             print(f"获取关注列表第{page}页失败")
             break
 
-    print(f"成功获取{len(follow_list)}个关注的UP主")
+    total_follows = len(follow_list)
+    print(f"成功获取{total_follows}个关注的UP主")
     
-    # 随机打乱关注列表顺序
-    random.shuffle(follow_list)
+    # 根据星期几来划分关注列表
+    weekday = time.localtime().tm_wday  # 0-6，0是周一
+    section_size = 500  # 每次处理的关注数量
+    total_sections = (total_follows + section_size - 1) // section_size  # 向上取整得到总段数
+    current_section = weekday % total_sections  # 根据星期确定处理哪一段
+    
+    start_idx = current_section * section_size
+    end_idx = min(start_idx + section_size, total_follows)
+    
+    # 获取今天要处理的关注列表片段
+    follow_list_section = follow_list[start_idx:end_idx]
+    print(f"\n今天是星期{weekday + 1}，将处理第{current_section + 1}段关注列表")
+    print(f"处理范围: {start_idx + 1}-{end_idx}，共{len(follow_list_section)}个UP主")
+    
+    # 随机打乱当前段的关注列表顺序
+    random.shuffle(follow_list_section)
 
     # 记录已经转发过的动态ID
     already_repost_dyid = set()
@@ -312,7 +364,7 @@ async def lottery_task(biliapi: BiliAPI):
 
     # 处理新动态
     print("\n开始处理新动态...")
-    for up_id in follow_list:
+    for up_id in follow_list_section:
         try:
             wait_time = random.uniform(config['check_interval'][0], config['check_interval'][1])
             print(f"\n将在 {wait_time:.1f} 秒后检查UP主 {up_id} 的动态...")
