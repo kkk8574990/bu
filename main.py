@@ -283,6 +283,11 @@ async def lottery_task(biliapi: BiliAPI):
         "delay": [53, 337],
         "interval": (4, 8),
         "check_interval": [15, 32]
+        "repost_with_tag": {
+            "enabled": True,  # 是否启用带标签转发
+            "fix": 1,  # 1: 标签加在后面, 0: 标签加在前面
+            "except": ["#互动抽奖#", "#抽奖#"]  # 排除的标签
+        }
     }
 
     # 计算7天前的时间戳
@@ -386,7 +391,12 @@ async def lottery_task(biliapi: BiliAPI):
                     if pub_ts < seven_days_ago:
                         print(f"动态时间超过7天，停止检查该UP主")
                         break
-
+                     # 获取动态类型并判断是否是视频动态
+                    module_dynamic = modules.get("module_dynamic", {})
+                    dynamic_type = module_dynamic.get("type", "")
+                    if dynamic_type == "DYNAMIC_TYPE_AV":
+                        print(f"跳过视频动态 {dynamic_id}")
+                        continue
                     # 检查是否已经转发
                     if int(dynamic_id) in already_repost_dyid:
                         print(f"动态 {dynamic_id} 已经转发过，跳过")
@@ -413,10 +423,27 @@ async def lottery_task(biliapi: BiliAPI):
                         print(f"\n发现抽奖动态: {content[:50]}...")
                         print(f"动态时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pub_ts))}")
                         processed_dynamics.add(dynamic_id)
-
+                
+                        # 处理标签
+                        if config["repost_with_tag"]["enabled"]:
+                            # 提取动态中的标签
+                            tag_rex = r'#(.+?)#'
+                            tags = re.findall(tag_rex, content)
+                            # 排除不需要的标签
+                            tags = [f"#{tag}#" for tag in tags if f"#{tag}#" not in config["repost_with_tag"]["except"]]
+                            
+                            # 生成转发内容
+                            repost_content = random.choice(config["repost"])
+                            if tags:
+                                if config["repost_with_tag"]["fix"] == 1:
+                                    repost_content = f"{repost_content} {' '.join(tags)}"
+                                else:
+                                    repost_content = f"{' '.join(tags)} {repost_content}"
+                        else:
+                            repost_content = random.choice(config["repost"])
+                
                         # 转发
                         print("开始转发...")
-                        repost_content = random.choice(config["repost"])
                         repost_ret = await biliapi.repost_dynamic(dynamic_id, repost_content)
                         if repost_ret["code"] == 0:
                             print(f"转发成功! 内容: {repost_content}")
