@@ -384,9 +384,8 @@ async def lottery_task(biliapi: BiliAPI):
                     
                     # 获取动态类型并判断是否是视频动态
                     module_dynamic = modules.get("module_dynamic", {})
-                    dynamic_type = module_dynamic.get("type", "")
-                    if dynamic_type == "DYNAMIC_TYPE_AV":
-                        print(f"跳过视频动态 {dynamic_id}")
+                    major = module_dynamic.get("major", {})
+                    if major and major.get("type") == "MAJOR_TYPE_ARCHIVE":
                         continue
                     
                     # 检查是否在七天内
