@@ -281,7 +281,7 @@ async def lottery_task(biliapi: BiliAPI):
         "keywords": ["^((?!恭喜).)*#互动抽奖#((?!恭喜).)*$", "^((?!恭喜).)*#抽奖#((?!恭喜).)*$",
                     ".*(转|抽|评).*(转|抽|评).*(转|抽|评).*"],
         "delay": [53, 337],
-        "interval": (4, 8),
+        "interval": (8, 12),
         "check_interval": [15, 32]
     }
 
@@ -296,32 +296,47 @@ async def lottery_task(biliapi: BiliAPI):
     keywords = [re.compile(x, re.S) for x in config["keywords"]]
     
     # 获取完整关注列表
+    # 获取完整关注列表
     print("\n开始获取关注列表...")
     follow_list = []
     page = 1
-    while True:
-        wait_time = random.uniform(config['interval'][0], config['interval'][1])
-        print(f"将在 {wait_time:.1f} 秒后获取第{page}页关注列表...")
-        await asyncio.sleep(wait_time)
-        
-        ret = await biliapi.get_followings(page)
-        if ret["code"] == 0:
-            if not ret["data"]["list"]:
-                break
-            follow_list.extend([x["mid"] for x in ret["data"]["list"]])
-            print(f"已获取第{page}页关注列表，当前共{len(follow_list)}个")
-            page += 1
-        else:
-            print(f"获取关注列表第{page}页失败")
-            break
+    retry_count = 0
+    max_retries = 3
+
+    while retry_count < max_retries:
+        try:
+            wait_time = random.uniform(config['interval'][0], config['interval'][1])
+            print(f"将在 {wait_time:.1f} 秒后获取第{page}页关注列表...")
+            await asyncio.sleep(wait_time)
+            
+            ret = await biliapi.get_followings(page)
+            if ret["code"] == 0:
+                if not ret["data"]["list"]:
+                    break
+                follow_list.extend([x["mid"] for x in ret["data"]["list"]])
+                print(f"已获取第{page}页关注列表，当前共{len(follow_list)}个")
+                page += 1
+                retry_count = 0  # 成功后重置重试计数
+            else:
+                retry_count += 1
+                print(f"获取关注列表第{page}页失败，将在10秒后重试... ({retry_count}/{max_retries})")
+                await asyncio.sleep(10)
+        except Exception as e:
+            retry_count += 1
+            print(f"获取关注列表出错: {str(e)}，将在10秒后重试... ({retry_count}/{max_retries})")
+            await asyncio.sleep(10)
 
     total_follows = len(follow_list)
+    if total_follows == 0:
+        print("未能获取到任何关注列表，退出任务")
+        return
+        
     print(f"成功获取{total_follows}个关注的UP主")
     
     # 根据星期几来划分关注列表
     weekday = time.localtime().tm_wday  # 0-6，0是周一
     section_size = 500  # 每次处理的关注数量
-    total_sections = (total_follows + section_size - 1) // section_size  # 向上取整得到总段数
+    total_sections = max(1, (total_follows + section_size - 1) // section_size)  # 确保至少有1个分段
     current_section = weekday % total_sections  # 根据星期确定处理哪一段
     
     start_idx = current_section * section_size
@@ -331,6 +346,10 @@ async def lottery_task(biliapi: BiliAPI):
     follow_list_section = follow_list[start_idx:end_idx]
     print(f"\n今天是星期{weekday + 1}，将处理第{current_section + 1}段关注列表")
     print(f"处理范围: {start_idx + 1}-{end_idx}，共{len(follow_list_section)}个UP主")
+    
+    if not follow_list_section:
+        print("当前分段没有需要处理的UP主，退出任务")
+        return
     
     # 随机打乱当前段的关注列表顺序
     random.shuffle(follow_list_section)
