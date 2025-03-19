@@ -172,14 +172,12 @@ class BiliAPI:
     async def dynamic_like(self, dynamic_id: str) -> dict:
         '''点赞动态'''
         try:
-            url = 'https://api.vc.bilibili.com/dynamic_like/v1/dynamic_like/thumb'  # 旧API
-            
-            # 使用新的点赞API
             url = 'https://api.bilibili.com/x/dynamic/feed/dyn/thumb'
             
+            # 新的参数格式
             data = {
-                'dyn_id': str(dynamic_id),
-                'type': 1,  # 1是点赞，2是取消点赞
+                'dynamic_id': str(dynamic_id),  # 改为 dynamic_id
+                'up': 1,  # 1是点赞，2是取消点赞
                 'csrf': self.cookies['bili_jct']
             }
             
