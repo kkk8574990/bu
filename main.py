@@ -172,32 +172,31 @@ class BiliAPI:
     async def dynamic_like(self, dynamic_id: str) -> dict:
         '''点赞动态'''
         try:
+            url = 'https://api.vc.bilibili.com/dynamic_like/v1/dynamic_like/thumb'  # 旧API
+            
+            # 使用新的点赞API
             url = 'https://api.bilibili.com/x/dynamic/feed/dyn/thumb'
             
-            json_data = {
-                "dyn_id_str": str(dynamic_id),
-                "up": 1
+            data = {
+                'dyn_id': str(dynamic_id),
+                'type': 1,  # 1是点赞，2是取消点赞
+                'csrf': self.cookies['bili_jct']
             }
             
             headers = {
                 **self.headers,
                 'authority': 'api.bilibili.com',
-                'content-type': 'application/json',
+                'content-type': 'application/x-www-form-urlencoded',
                 'origin': 'https://t.bilibili.com',
                 'referer': 'https://t.bilibili.com/',
                 'accept': 'application/json, text/plain, */*'
             }
             
-            params = {
-                'csrf': self.cookies['bili_jct']
-            }
-            
-            async with self.session.post(url, json=json_data, headers=headers, params=params) as response:
+            async with self.session.post(url, data=data) as response:
                 return await response.json()
         except Exception as e:
             print(f"点赞失败: {e}")
             return {"code": -1}
-
 async def get_dynamic(biliapi: BiliAPI, uid: int = None):
     """获取动态的生成器函数"""
     offset = ''
